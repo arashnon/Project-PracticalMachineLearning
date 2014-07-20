@@ -1,0 +1,112 @@
+Practical Machine Learning 
+========================================================
+Project: Building a model for predicting fitness exercise correctness
+----------------------------------------------------------------------
+
+In this project I build a predictive model to clasify the correctness of a particular fittness exercise. More information about the activity, the data and the measurments can be found in [1].   
+
+Loading the data and exploratory data analysis 
+------------------
+The data is in cvs format and can be readily loaded into R using read.csv command. 
+
+```{r}
+raw.pml.train<-read.csv("pml-training.csv",header=TRUE)
+raw.pml.test<-read.csv("pml-testing.csv",header=TRUE)
+dim(raw.pml.train)
+dim(raw.pml.test)
+```
+
+A quick inspection of data shows that in both training set and testing set there are lots of missing observations for many of 159 predictors. It seems we have sufficient number of predictors even if we ignore the predcitors with missing values. So I decide to only keep the predictors with complete set. This is how I am going to do this: 
+
+```{r}
+pml.train.tmp<-read.csv("pml-training.csv",header=TRUE,na.strings = c("NA",""))
+pml.train<-pml.train.tmp[ , colSums(is.na(pml.train.tmp)) == 0]
+dim(pml.train)
+```
+
+List of features in the training data: 
+
+```{r}
+names(pml.train)
+```
+
+Further inspection reveals that the firs 7 coloumns have nothing to do with the accelerometer measurments and clearly not relevant to any aspect of an excercise quality. Therfore I also discard these variables: *X*, *user_name*, *raw_timestamp_part_1*, *raw_timestamp_part_2*, *cvtd_timestamp*, *new_window*, *num_window*
+
+```{r}
+include.pred<-names(pml.train[8:(ncol(pml.train)-1)])
+pml.train<-pml.train[,c(include.pred,"classe")]
+pml.test<-raw.pml.test[, include.pred]
+dim(pml.train)
+dim(pml.test)
+```
+
+### Feature reduction 
+Now I examine the possibility of any strong linear correlation among the predictors that can potentially lead to reducing the number of predictrors and building a more efficient model. I calculate the correlation matrix and visualize it. We can visulaize the corrleation matix using different plotting features in R. I am going to use a package called **corrplot** which is very useful for visualizaton and initial examination. 
+
+```{r}
+library(corrplot)
+cor.matrix <- cor(pml.train[,-ncol(pml.train)])
+corrplot(cor.matrix, order = "hclust",tl.pos="n")
+```
+
+A quick inspection of the plot shows that there are only few predcitors that are strongly correlted.  I discard the features with a correlation of more than 0.95. *findCorrealtion* function in the caret package provides a shortcut to get this done.     
+
+```{r}
+library(caret)
+highly.cor.pred<- findCorrelation(cor.matrix, 0.95)
+include.pred.filtered<-include.pred[-highly.cor.pred]
+pml.train.filtered<-pml.train[,c(include.pred.filtered,"classe")]
+pml.test.filtered<-pml.test[,include.pred.filtered]
+dim(pml.train.filtered)
+dim(pml.test.filtered)
+```
+
+Building the predictive model
+----------------
+I am going to use Random Forest method as the predictive algortithm [2]. Here is some of the advantages of this algorithm that makes it suitable for this purpose: 
+
+- Random forest is a very accurate learning algorithm. 
+- It is relatively efficient for large data set and can handle large number of predictors. 
+- It is capable of capturing the nonlinear relationship. 
+- It readily gives estimates of variable importance, which provides useful insight about the model. 
+- It has a systematic way of cross-validation internally and generating estimation of model accuracy measures. It 
+does not require partitioning the data to training and testing set. 
+
+I will make use of **randomForest** library to build the predictive model. One of the main parameter that needs to be specified is the number of trees, *ntree*. First I build the model with the default value that is *ntree=500*. 
+
+```{r}
+library(randomForest)
+modFit <- randomForest(classe ~ ., data = pml.train.filtered)
+modFit
+```
+
+The values of out-of-bag error (OOB) and the confuision matrix suggest that we already have relatively samll error rate and high accuracy. I am going to try with *ntree=1000* to see if I can get even more accurate model. 
+
+```{r}
+modFit <- randomForest(classe ~ ., data = pml.train.filtered,ntree=1000)
+modFit
+```
+
+So increasing the number of trees did not further improve the accuracy. So I am going to stop here and use the model with 1000 trees.  
+
+Another interesting feature in random forest algorithm is the variable importance that indicates the relative contribution of the predictors in the model. 
+
+```{r}
+pml.train.varimp <- varImp(modFit, conditional =  TRUE)
+varImpPlot(modFit,sort=TRUE)
+```
+
+The least important variable (*magnet_arm_z*) has an important measure that is only 80% less than most important one (*yaw_belt*). So all the predcitros have a reasonable level of importance in the model. 
+
+The model is ready to be employed and can be applied to the testing data for prediction using the following command: 
+
+```
+predict(modFit,newdata=pml.test.filtered)
+```
+
+
+References 
+----------
+[1] Ugulino, W.; Cardador, D.; Vega, K.; Velloso, E.; Milidiu, R.; Fuks, H. Wearable Computing: Accelerometers' Data Classification of Body Postures and Movements. Proceedings of 21st Brazilian Symposium on Artificial Intelligence. Advances in Artificial Intelligence - SBIA 2012. In: Lecture Notes in Computer Science. , pp. 52-61. Curitiba, PR: Springer Berlin / Heidelberg, 2012. ISBN 978-3-642-34458-9. DOI: 10.1007/978-3-642-34459-6_6. 
+
+[2] Breiman, Leo (2001). "Random Forests". Machine Learning 45 (1): 5-32. doi:10.1023/A:1010933404324
